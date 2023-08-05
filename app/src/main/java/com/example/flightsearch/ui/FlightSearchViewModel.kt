@@ -1,65 +1,138 @@
 package com.example.flightsearch.ui
 
+import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.CreationExtras
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.flightsearch.FlightSearchApplication
 import com.example.flightsearch.data.Airport
+import com.example.flightsearch.data.Favorite
 import com.example.flightsearch.data.Flight
-import com.example.flightsearch.data.FlightSearchData
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import com.example.flightsearch.data.FlightSearchRepository
+import com.example.flightsearch.data.UserPreferencesRepository
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
-class FlightSearchViewModel : ViewModel() {
-    private var _uiState: MutableStateFlow<FlightSearchUiState> =
-        MutableStateFlow(FlightSearchUiState())
+class FlightSearchViewModel(
+    private val flightSearchRepository: FlightSearchRepository,
+    private val userPreferencesRepository: UserPreferencesRepository
+) : ViewModel() {
+    var searchTerm by mutableStateOf("")
 
-    val uiState = _uiState.asStateFlow()
+    var selectedAirport: Airport? by mutableStateOf(null)
 
-    fun matchAirports(searchTerm: String) {
-        val airportList: List<Airport> =
-            with(_uiState.value.searchTerm) {
-                if (this == "") emptyList() else
-                    FlightSearchData.airportList.filter { airport ->
-                        airport.name.contains(this, ignoreCase = true) || airport.iataCode.contains(
-                            this, ignoreCase = true
-                        )
-                    }
+    var matchedAirports: List<Airport> by mutableStateOf(emptyList())
+
+    var flights: List<Flight> by mutableStateOf(emptyList())
+
+    val favoriteFlights: StateFlow<List<Flight>> =
+        flightSearchRepository.getAllFavoritesStream().map { favorites ->
+            favorites.map {
+                Flight(
+                    departureAirport =
+                    flightSearchRepository.getAirportByIataCode(it.departureCode),
+                    arrivalAirport =
+                    flightSearchRepository.getAirportByIataCode(it.destinationCode),
+                )
             }
-        _uiState.value = _uiState.value.copy(
-            searchTerm = searchTerm,
-            matchedAirports = airportList
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(TIMEOUT_MILLIS),
+            initialValue = emptyList()
         )
+
+    init {
+        viewModelScope.launch {
+            searchTerm = userPreferencesRepository.searchString.first()
+            matchedAirports = flightSearchRepository
+                .getMatchingAirports(
+                    "%${searchTerm}%"
+                )
+        }
+    }
+
+    fun matchAirports(userSearchTerm: String) {
+        searchTerm = userSearchTerm
+        viewModelScope.launch {
+            launch {
+                matchedAirports = flightSearchRepository
+                    .getMatchingAirports("%${searchTerm}%")
+            }
+            launch {
+                userPreferencesRepository.saveUserSearchString(userSearchTerm)
+            }
+
+        }
     }
 
     fun selectAirport(airport: Airport) {
-        _uiState.value = _uiState.value.copy(
-            selectedAirport = airport,
-            flights = populateFlights(airport)
-        )
-    }
-
-    fun toggleFavourite(flight: Flight) {
-        _uiState.value = _uiState.value.copy(
-            favouriteFlights = if (_uiState.value.favouriteFlights.contains(flight))
-                _uiState.value.favouriteFlights.minus(flight)
-            else _uiState.value.favouriteFlights.plus(flight)
-        )
-    }
-
-    private fun populateFlights(airport: Airport): List<Flight> {
-        val flights: MutableList<Flight> = mutableListOf()
-        FlightSearchData.airportList.forEach {
-            if (airport != it) flights.add(Flight(airport, it))
+        selectedAirport = airport
+        viewModelScope.launch {
+            populateFlights(airport)
         }
+    }
 
-        return flights
+    fun toggleFavorite(flight: Flight) {
+        viewModelScope.launch {
+            val favorite = flightSearchRepository.getFavoriteBy(
+                flight.departureAirport.iataCode,
+                flight.arrivalAirport.iataCode
+            ).firstOrNull()
+
+            if (favorite != null)
+                flightSearchRepository.removeFavorite(favorite)
+            else
+                flightSearchRepository.addFavorite(
+                    flight.toFavouriteWithoutIndex()
+                )
+
+            Log.d("FAV_FLIGHTS", favoriteFlights.value.toString())
+        }
+    }
+
+    private suspend fun populateFlights(airport: Airport) {
+        flights = flightSearchRepository.getArrivalAirportsFor(airport.id).map {
+            it.toFlight(airport)
+        }
+    }
+
+    companion object {
+        private const val TIMEOUT_MILLIS = 5_000L
+        val Factory = viewModelFactory {
+            initializer {
+                FlightSearchViewModel(getFlightSearchRepository(), getUserPreferencesRepository())
+            }
+        }
     }
 
 
 }
 
-data class FlightSearchUiState(
-    val selectedAirport: Airport? = null,
-    val searchTerm: String = "",
-    val matchedAirports: List<Airport> = emptyList(),
-    val flights: List<Flight> = emptyList(),
-    val favouriteFlights: List<Flight> = emptyList()
+fun CreationExtras.getFlightSearchRepository(): FlightSearchRepository {
+    val application = this[APPLICATION_KEY] as FlightSearchApplication
+    return application.container.flightSearchRepository
+}
+
+fun CreationExtras.getUserPreferencesRepository(): UserPreferencesRepository {
+    val application = this[APPLICATION_KEY] as FlightSearchApplication
+    return application.container.userPreferencesRepository
+}
+
+fun Airport.toFlight(departureAirport: Airport, favouriteId: Int? = null): Flight =
+    Flight(departureAirport, this, favouriteId)
+
+fun Flight.toFavouriteWithoutIndex(): Favorite = Favorite(
+    departureCode = this.departureAirport.iataCode,
+    destinationCode = this.arrivalAirport.iataCode
 )

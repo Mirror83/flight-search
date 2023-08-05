@@ -10,15 +10,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import com.example.flightsearch.R
 import com.example.flightsearch.data.Airport
 import com.example.flightsearch.data.Flight
@@ -47,7 +48,8 @@ fun SearchScreen(
                     contentDescription = null
                 )
             },
-            shape = RoundedCornerShape(40)
+            shape = RoundedCornerShape(40),
+            modifier = Modifier.padding(dimensionResource(id = R.dimen.padding_medium))
         )
 
         if (searchTerm.isBlank()) {
@@ -55,27 +57,41 @@ fun SearchScreen(
                 Text(
                     text = "No favourites yet!",
                     textAlign = TextAlign.Center,
-                    modifier = modifier.padding(top = 8.dp)
                 )
             else {
-                LazyColumn {
-                    items(favouriteFlights, { it.arrivalAirport.iataCode }) {
-                        FlightCard(
-                            flight = it,
-                            isFavourite = favouriteFlights.contains(it),
-                            toggleFavourite = toggleFavourite,
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .fillMaxWidth()
-                        )
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = dimensionResource(id = R.dimen.padding_medium))
+                ) {
+                    Text(
+                        "Favourite routes",
+                        modifier = Modifier.padding(
+                            bottom = dimensionResource(id = R.dimen.padding_small)
+                        ),
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    LazyColumn {
+                        items(favouriteFlights) {
+                            FlightCard(
+                                flight = it,
+                                isFavourite = favouriteFlights.contains(it),
+                                toggleFavourite = toggleFavourite,
+                                modifier = Modifier
+                                    .padding(
+                                        vertical = dimensionResource(id = R.dimen.padding_small)
+                                    )
+                                    .fillMaxWidth()
+                            )
+                        }
                     }
                 }
+
             }
         } else if (airports.isEmpty()) {
             Text(
                 text = "No airports matching the search",
                 textAlign = TextAlign.Center,
-                modifier = modifier.padding(top = 8.dp)
+                modifier = modifier.padding(top = dimensionResource(id = R.dimen.padding_small))
             )
         } else {
             AirportList(airports = airports, onAirportSelected)
@@ -93,7 +109,8 @@ fun AirportList(
         items(airports, { it.id }) {
             AirportRow(it,
                 modifier
-                    .padding(16.dp)
+                    .padding(dimensionResource(id = R.dimen.padding_medium))
+                    .fillMaxWidth()
                     .clickable { onAirportSelected(it) })
         }
     }
@@ -107,7 +124,8 @@ fun AirportRow(airport: Airport, modifier: Modifier = Modifier) {
         Text(
             airport.iataCode,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(end = 8.dp)
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(end = dimensionResource(id = R.dimen.padding_small))
         )
         Text(airport.name)
     }
